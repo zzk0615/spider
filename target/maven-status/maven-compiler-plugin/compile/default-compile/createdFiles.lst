@@ -1,4 +1,5 @@
-com\example\entity\PhoneData.class
-com\example\service\impl\PhoneDataServiceImpl.class
-com\example\controller\PhoneDataController.class
-com\example\service\PhoneDataService.class
+com\ziroom\entity\ZiroomListing.class
+com\ziroom\repository\ZiroomListingRepository.class
+com\ziroom\service\ZiroomListingService.class
+com\ziroom\controller\ZiroomListingController.class
+com\ziroom\ZiroomApplication.class

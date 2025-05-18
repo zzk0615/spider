@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>自如房源数据分析</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        .filter-section {
+            background-color: #f8f9fa;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .listing-card {
+            margin-bottom: 20px;
+            transition: transform 0.2s;
+        }
+        .listing-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        .price-tag {
+            color: #ff4d4f;
+            font-weight: bold;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+        .stats-card {
+            background: linear-gradient(45deg, #1890ff, #36cfc9);
+            color: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-4">
+        <h1 class="text-center mb-4">自如房源数据分析</h1>
+        
+        <!-- 筛选条件 -->
+        <div class="filter-section">
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <select class="form-select" id="citySelect">
+                        <option value="">选择城市</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <select class="form-select" id="districtSelect" disabled>
+                        <option value="">选择区域</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <select class="form-select" id="roomTypeSelect">
+                        <option value="">选择房型</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <div class="input-group">
+                        <input type="number" class="form-control" id="minPrice" placeholder="最低价格">
+                        <input type="number" class="form-control" id="maxPrice" placeholder="最高价格">
+                    </div>
+                </div>
+                <div class="col-12 text-center">
+                    <button class="btn btn-primary" id="searchBtn">
+                        <i class="bi bi-search"></i> 搜索
+                    </button>
+                    <button class="btn btn-outline-secondary" id="resetBtn">
+                        <i class="bi bi-arrow-counterclockwise"></i> 重置
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 统计信息 -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="stats-card">
+                    <h5>房型分布</h5>
+                    <div id="roomTypeChart" style="height: 300px;"></div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="stats-card">
+                    <h5>区域均价分布</h5>
+                    <div id="priceChart" style="height: 300px;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 加载提示 -->
+        <div class="loading" id="loadingIndicator">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">加载中...</span>
+            </div>
+            <p class="mt-2">正在加载数据...</p>
+        </div>
+
+        <!-- 房源列表 -->
+        <div class="row" id="listingContainer">
+            <!-- 房源卡片将通过 JavaScript 动态生成 -->
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <script>
+        // 全局变量
+        let currentCity = '';
+        let roomTypeChart = null;
+        let priceChart = null;
+
+        // 初始化城市下拉框
+        function initCitySelect() {
+            fetch('/api/v1/listings/cities')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.success) {
+                        const citySelect = document.getElementById('citySelect');
+                        data.data.forEach(city => {
+                            const option = document.createElement('option');
+                            option.value = city;
+                            option.textContent = city;
+                            citySelect.appendChild(option);
+                        });
+                    }
+                })
+                .catch(error => {
+                    console.error('加载城市列表失败:', error);
+                    showError('加载城市列表失败，请刷新页面重试');
+                });
+        }
+
+        // 初始化区域下拉框
+        function initDistrictSelect(city) {
+            const districtSelect = document.getElementById('districtSelect');
+            districtSelect.innerHTML = '<option value="">选择区域</option>';
+            districtSelect.disabled = !city;
+
+            if (city) {
+                fetch(`/api/v1/listings/cities/${city}/districts`)
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! status: ${response.status}`);
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        if (data.success) {
+                            data.data.forEach(district => {
+                                const option = document.createElement('option');
+                                option.value = district;
+                                option.textContent = district;
+                                districtSelect.appendChild(option);
+                            });
+                        }
+                    })
+                    .catch(error => {
+                        console.error('加载区域列表失败:', error);
+                        showError('加载区域列表失败，请重试');
+                    });
+            }
+        }
+
+        // 初始化房型下拉框
+        function initRoomTypeSelect() {
+            fetch('/api/v1/listings/room-types')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.success) {
+                        const roomTypeSelect = document.getElementById('roomTypeSelect');
+                        data.data.forEach(roomType => {
+                            const option = document.createElement('option');
+                            option.value = roomType;
+                            option.textContent = roomType;
+                            roomTypeSelect.appendChild(option);
+                        });
+                    }
+                })
+                .catch(error => {
+                    console.error('加载房型列表失败:', error);
+                    showError('加载房型列表失败，请刷新页面重试');
+                });
+        }
+
+        // 初始化图表
+        function initCharts() {
+            roomTypeChart = echarts.init(document.getElementById('roomTypeChart'));
+            priceChart = echarts.init(document.getElementById('priceChart'));
+            
+            // 加载房型分布数据
+            fetch('/api/v1/listings/statistics/room-types')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        updateRoomTypeChart(data.data);
+                    }
+                })
+                .catch(error => {
+                    console.error('加载房型分布数据失败:', error);
+                });
+
+            // 加载区域均价数据
+            fetch('/api/v1/listings/statistics/cities/北京/district-prices')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        updatePriceChart(data.data);
+                    }
+                })
+                .catch(error => {
+                    console.error('加载区域均价数据失败:', error);
+                });
+        }
+
+        // 更新房型分布图表
+        function updateRoomTypeChart(data) {
+            const option = {
+                tooltip: {
+                    trigger: 'item',
+                    formatter: '{b}: {c} ({d}%)'
+                },
+                series: [{
+                    type: 'pie',
+                    radius: '70%',
+                    data: Object.entries(data).map(([name, value]) => ({ name, value })),
+                    emphasis: {
+                        itemStyle: {
+                            shadowBlur: 10,
+                            shadowOffsetX: 0,
+                            shadowColor: 'rgba(0, 0, 0, 0.5)'
+                        }
+                    }
+                }]
+            };
+            roomTypeChart.setOption(option);
+        }
+
+        // 更新区域均价图表
+        function updatePriceChart(data) {
+            const option = {
+                tooltip: {
+                    trigger: 'axis',
+                    axisPointer: {
+                        type: 'shadow'
+                    }
+                },
+                xAxis: {
+                    type: 'category',
+                    data: Object.keys(data),
+                    axisLabel: {
+                        interval: 0,
+                        rotate: 30
+                    }
+                },
+                yAxis: {
+                    type: 'value',
+                    name: '均价（元/月）'
+                },
+                series: [{
+                    data: Object.values(data),
+                    type: 'bar'
+                }]
+            };
+            priceChart.setOption(option);
+        }
+
+        // 加载房源列表
+        function loadListings(params = {}) {
+            const loadingIndicator = document.getElementById('loadingIndicator');
+            const listingContainer = document.getElementById('listingContainer');
+            
+            loadingIndicator.style.display = 'block';
+            listingContainer.innerHTML = '';
+
+            // 构建查询参数
+            const queryParams = new URLSearchParams();
+            if (params.minPrice) queryParams.append('minPrice', params.minPrice);
+            if (params.maxPrice) queryParams.append('maxPrice', params.maxPrice);
+            if (params.roomType) queryParams.append('roomType', params.roomType);
+
+            // 构建URL
+            let url = '/api/v1/listings';
+            if (params.city) {
+                url = `/api/v1/listings/cities/${params.city}`;
+                if (params.district) {
+                    url = `/api/v1/listings/cities/${params.city}/districts/${params.district}`;
+                }
+            }
+            if (queryParams.toString()) {
+                url += '?' + queryParams.toString();
+            }
+
+            fetch(url)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.success) {
+                        renderListings(data.data);
+                    } else {
+                        showError(data.message || '加载数据失败');
+                    }
+                })
+                .catch(error => {
+                    console.error('加载房源列表失败:', error);
+                    showError('加载数据失败，请稍后重试');
+                })
+                .finally(() => {
+                    loadingIndicator.style.display = 'none';
+                });
+        }
+
+        // 渲染房源列表
+        function renderListings(listings) {
+            const container = document.getElementById('listingContainer');
+            container.innerHTML = listings.map(listing => `
+                <div class="col-md-4">
+                    <div class="card listing-card">
+                        <div class="card-body">
+                            <h5 class="card-title">${listing.title}</h5>
+                            <p class="card-text">
+                                <i class="bi bi-geo-alt"></i> ${listing.district} - ${listing.neighborhood}<br>
+                                <i class="bi bi-house"></i> ${listing.roomType} | ${listing.areaSqm}㎡<br>
+                                <span class="price-tag">¥${listing.priceMonth}/月</span>
+                            </p>
+                            <a href="${listing.listingUrl}" class="btn btn-outline-primary" target="_blank">
+                                查看详情
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // 显示错误信息
+        function showError(message) {
+            const container = document.getElementById('listingContainer');
+            container.innerHTML = `
+                <div class="col-12">
+                    <div class="alert alert-danger" role="alert">
+                        ${message}
+                    </div>
+                </div>
+            `;
+        }
+
+        // 初始化页面
+        document.addEventListener('DOMContentLoaded', function() {
+            // 初始化下拉框
+            initCitySelect();
+            initRoomTypeSelect();
+            
+            // 初始化图表
+            initCharts();
+            
+            // 加载初始房源列表
+            loadListings();
+
+            // 城市选择事件
+            document.getElementById('citySelect').addEventListener('change', function(e) {
+                currentCity = e.target.value;
+                initDistrictSelect(currentCity);
+                
+                if (currentCity) {
+                    // 更新区域均价图表
+                    fetch(`/api/v1/listings/statistics/cities/${currentCity}/district-prices`)
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                updatePriceChart(data.data);
+                            }
+                        });
+                }
+            });
+
+            // 搜索按钮事件
+            document.getElementById('searchBtn').addEventListener('click', function() {
+                const params = {
+                    city: document.getElementById('citySelect').value,
+                    district: document.getElementById('districtSelect').value,
+                    roomType: document.getElementById('roomTypeSelect').value,
+                    minPrice: document.getElementById('minPrice').value,
+                    maxPrice: document.getElementById('maxPrice').value
+                };
+                loadListings(params);
+            });
+
+            // 重置按钮事件
+            document.getElementById('resetBtn').addEventListener('click', function() {
+                document.getElementById('citySelect').value = '';
+                document.getElementById('districtSelect').value = '';
+                document.getElementById('districtSelect').disabled = true;
+                document.getElementById('roomTypeSelect').value = '';
+                document.getElementById('minPrice').value = '';
+                document.getElementById('maxPrice').value = '';
+                loadListings();
+            });
+
+            // 窗口大小改变时重绘图表
+            window.addEventListener('resize', function() {
+                roomTypeChart && roomTypeChart.resize();
+                priceChart && priceChart.resize();
+            });
+        });
+    </script>
+</body>
+</html> 
